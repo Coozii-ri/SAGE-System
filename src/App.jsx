@@ -3,32 +3,15 @@ import {
   Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck,
   Bell, Building2, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight,
   CircleHelp, ClipboardCheck, Clock3, Computer, FileCheck2, FilePlus2, Fingerprint,
-  KeyRound, LayoutDashboard, LogOut, Menu, Plus, Search, Shield, ShieldCheck,
-  UserRound, Users, X,
+  KeyRound, LayoutDashboard, LogOut, Menu, Moon, Plus, Search, Shield, ShieldCheck,
+  Sun, UserRound, Users, X,
 } from 'lucide-react';
 import GuestPortal from './GuestPortal.jsx';
+import { api } from './api.js';
 
 const DEMO_PASSWORD = 'SageDemo2026!';
-const FACILITIES_EMAIL = 'facilities@sage.campus';
-const GUARD_EMAIL = 'guard@sage.campus';
-
-async function api(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  });
-  if (response.status === 204) return null;
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(payload.error || 'Something went wrong.');
-    error.status = response.status;
-    throw error;
-  }
-  return payload;
-}
+const FACILITIES_EMAIL = 'facility@feu.edu.ph';
+const GUARD_EMAIL = 'guard@feu.edu.ph';
 
 function formatDate(value, options = {}) {
   if (!value) return '—';
@@ -61,26 +44,34 @@ function StatusPill({ status }) {
   return <span className={`status-pill status-${style}`}><span className="status-dot" />{status}</span>;
 }
 
-function Login({ onLogin, onGuestLogin }) {
-  const [audience, setAudience] = useState('staff');
-  const [guestMode, setGuestMode] = useState('login');
+function ThemeToggle({ theme, onToggle }) {
+  const isDark = theme === 'dark';
+  return <button
+    className="theme-toggle"
+    type="button"
+    onClick={onToggle}
+    aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+    aria-pressed={isDark}
+    title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+  >
+    <span key={theme} className="theme-toggle-icon">{isDark ? <Sun size={18} /> : <Moon size={17} />}</span>
+    <span className="theme-toggle-label">{isDark ? 'Light' : 'Dark'} mode</span>
+  </button>;
+}
+
+function Login({ onLogin, onGuestLogin, onReferenceLookup, theme, onToggleTheme }) {
+  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState(import.meta.env.DEV ? FACILITIES_EMAIL : '');
   const [password, setPassword] = useState(import.meta.env.DEV ? DEMO_PASSWORD : '');
+  const [referenceId, setReferenceId] = useState('');
   const [profile, setProfile] = useState({ fullName: '', affiliation: '', contactNumber: '', govIdType: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  function changeAudience(nextAudience) {
-    setAudience(nextAudience);
+  function changeMode(nextMode) {
+    setMode(nextMode);
     setError('');
-    if (nextAudience === 'visitor') {
-      setEmail('');
-      setPassword('');
-    } else {
-      setEmail(import.meta.env.DEV ? FACILITIES_EMAIL : '');
-      setPassword(import.meta.env.DEV ? DEMO_PASSWORD : '');
-    }
   }
 
   async function submit(event) {
@@ -88,17 +79,18 @@ function Login({ onLogin, onGuestLogin }) {
     setBusy(true);
     setError('');
     try {
-      const path = audience === 'staff'
-        ? '/api/auth/login'
-        : guestMode === 'register' ? '/api/guest/auth/register' : '/api/guest/auth/login';
-      const body = audience === 'staff' || guestMode === 'login'
-        ? { email, password }
-        : { ...profile, email, password };
+      if (mode === 'reference') {
+        const result = await api(`/api/guest/passes/reference/${encodeURIComponent(referenceId.trim())}`);
+        onReferenceLookup(result);
+        return;
+      }
+      const path = mode === 'register' ? '/api/guest/auth/register' : '/api/auth/login';
+      const body = mode === 'register' ? { ...profile, email, password } : { email, password };
       const result = await api(path, {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      if (audience === 'staff') onLogin(result.staff);
+      if (result.staff) onLogin(result.staff);
       else onGuestLogin(result.guest);
     } catch (loginError) {
       setError(loginError.message);
@@ -109,44 +101,58 @@ function Login({ onLogin, onGuestLogin }) {
 
   return (
     <main className="login-shell">
-      <section className="login-visual">
+      <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      <div className="login-ambient" aria-hidden="true"><span /><span /><span /></div>
+      <div className="login-motion-art" aria-hidden="true">
+        <span className="motion-orbit motion-orbit-one" />
+        <span className="motion-orbit motion-orbit-two" />
+        <span className="motion-orbit motion-orbit-three" />
+        <span className="motion-core"><ShieldCheck size={52} strokeWidth={1.2} /></span>
+        <span className="motion-scanline" />
+      </div>
+      <section className="login-hero">
         <div className="login-brand"><span className="brand-mark"><ShieldCheck size={23} /></span><span>SAGE<span className="login-brand-caption">SECURE ACCESS FOR GUESTS & EQUIPMENTS</span></span></div>
         <div className="login-message">
-          <span className="eyebrow light-eyebrow"><span className="live-dot" /> CAMPUS ACCESS NETWORK · FEU INSTITUTE OF TECHNOLOGY</span>
-          <h1>Access<br /><em>without</em><br />compromise.</h1>
-          <p>One trusted channel for verified visitors, cleared equipment, and every movement on campus.</p>
+          <span className="eyebrow light-eyebrow"><span className="live-dot" /> FEU INSTITUTE OF TECHNOLOGY · CAMPUS ACCESS</span>
+          <h1>Every arrival,<br /><em>beautifully</em><br />accounted for.</h1>
+          <p>A calm, secure gateway for campus visits, equipment clearance, and the people who keep every movement accountable.</p>
         </div>
-        <div className="login-visual-footer"><Shield size={15} /> ENCRYPTED · VERIFIED · ACCOUNTABLE <span>SYS.01</span></div>
-        <div className="visual-orbit orbit-one" /><div className="visual-orbit orbit-two" /><div className="visual-grid" />
+        <div className="login-visual-footer"><Shield size={15} /> VERIFIED ACCESS <span>·</span> CLEAR EQUIPMENT <span>·</span> TRUSTED RECORDS</div>
       </section>
       <section className="login-panel">
         <div className="login-form-wrap">
           <div className="login-mobile-brand"><span className="brand-mark"><ShieldCheck size={22} /></span><span>SAGE<span className="login-brand-caption">CAMPUS ACCESS</span></span></div>
+          <h1 className="login-promise"><strong>Pass</strong> <em>verified</em> <strong>seamlessly.</strong></h1>
           <span className="eyebrow">SECURE IDENTITY GATEWAY <span className="eyebrow-code">01 / AUTH</span></span>
-          <h2>{audience === 'staff' ? 'Staff sign in' : guestMode === 'login' ? 'Welcome back.' : 'Create your visitor profile.'}</h2>
-          <p className="form-intro">{audience === 'staff' ? 'Access the campus operations console.' : guestMode === 'login' ? 'Sign in to view your visitor passes.' : 'Set up your profile to request a campus visit.'}</p>
-          <div className="audience-tabs" role="tablist" aria-label="Account type">
-            <button type="button" role="tab" aria-selected={audience === 'staff'} className={audience === 'staff' ? 'active' : ''} onClick={() => changeAudience('staff')}><ShieldCheck size={15} /> Staff access</button>
-            <button type="button" role="tab" aria-selected={audience === 'visitor'} className={audience === 'visitor' ? 'active' : ''} onClick={() => changeAudience('visitor')}><UserRound size={15} /> Visitor access</button>
-          </div>
-          {audience === 'visitor' && <div className="visitor-auth-switch"><span>{guestMode === 'login' ? 'New to Northbridge?' : 'Already registered?'}</span><button type="button" onClick={() => { setGuestMode(guestMode === 'login' ? 'register' : 'login'); setError(''); }}>{guestMode === 'login' ? 'Create visitor account' : 'Sign in instead'} <ArrowRight size={13} /></button></div>}
+          <h2>{mode === 'register' ? 'Create your visitor profile.' : mode === 'reference' ? 'Find your visitor pass.' : 'Welcome to SAGE.'}</h2>
+          <p className="form-intro">{mode === 'register' ? 'Set up a profile to request and manage campus visits.' : mode === 'reference' ? 'Enter the Reference ID printed on your pass.' : 'Sign in to your workspace or visitor dashboard.'}</p>
           <form onSubmit={submit} className="login-form">
-            {audience === 'visitor' && guestMode === 'register' && <>
+            {mode === 'register' && <>
               <label htmlFor="guest-name">Full name</label>
               <div className="input-with-icon"><UserRound size={17} /><input id="guest-name" autoComplete="name" value={profile.fullName} onChange={(event) => setProfile({ ...profile, fullName: event.target.value })} minLength="2" maxLength="120" required /></div>
               <label htmlFor="guest-affiliation">Affiliation <span className="optional">(optional)</span></label>
               <div className="input-with-icon"><Building2 size={17} /><input id="guest-affiliation" autoComplete="organization" value={profile.affiliation} onChange={(event) => setProfile({ ...profile, affiliation: event.target.value })} maxLength="120" /></div>
               <div className="guest-profile-fields"><div><label htmlFor="guest-phone">Contact number</label><div className="input-with-icon"><input id="guest-phone" autoComplete="tel" value={profile.contactNumber} onChange={(event) => setProfile({ ...profile, contactNumber: event.target.value })} minLength="5" maxLength="40" required /></div></div><div><label htmlFor="guest-id">Government ID</label><div className="input-with-icon"><input id="guest-id" value={profile.govIdType} onChange={(event) => setProfile({ ...profile, govIdType: event.target.value })} minLength="2" maxLength="60" placeholder="Passport" required /></div></div></div>
             </>}
-            <label htmlFor="email">{audience === 'staff' ? 'Work email' : 'Email address'}</label>
-            <div className="input-with-icon"><UserRound size={17} /><input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
-            <label htmlFor="password">{audience === 'visitor' && guestMode === 'register' ? 'Create password' : 'Password'}</label>
-            <div className="input-with-icon"><KeyRound size={17} /><input id="password" type={showPassword ? 'text' : 'password'} autoComplete={audience === 'visitor' && guestMode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={audience === 'visitor' && guestMode === 'register' ? 10 : undefined} required /><button className="input-action" type="button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</button></div>
-            {audience === 'visitor' && guestMode === 'register' && <small className="password-hint">Use at least 10 characters.</small>}
+            {mode === 'reference' ? <>
+              <label htmlFor="reference-id">Visitor Reference ID</label>
+              <div className="input-with-icon"><Fingerprint size={17} /><input id="reference-id" autoComplete="off" value={referenceId} onChange={(event) => setReferenceId(event.target.value)} placeholder="SAGE-2026-…" maxLength="64" required /></div>
+            </> : <>
+              <label htmlFor="email">Email address</label>
+              <div className="input-with-icon"><UserRound size={17} /><input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
+              <label htmlFor="password">{mode === 'register' ? 'Create password' : 'Password'}</label>
+              <div className="input-with-icon"><KeyRound size={17} /><input id="password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} minLength={mode === 'register' ? 10 : undefined} required /><button className="input-action" type="button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</button></div>
+              {mode === 'register' && <small className="password-hint">Use at least 10 characters.</small>}
+            </>}
             {error && <div className="inline-error" role="alert">{error}</div>}
-            <button type="submit" className="button button-primary login-submit" disabled={busy}>{busy ? 'Verifying…' : audience === 'staff' ? 'Enter staff console' : guestMode === 'register' ? 'Create account & continue' : 'Sign in to visitor portal'}<ArrowRight size={17} /></button>
+            <button type="submit" className="button button-primary login-submit" disabled={busy}>{busy ? 'Verifying…' : mode === 'register' ? 'Create account & continue' : mode === 'reference' ? 'View visitor pass' : 'Continue'}<ArrowRight size={17} /></button>
           </form>
-          {audience === 'staff' && import.meta.env.DEV && <div className="demo-access">
+          {mode === 'login' && <div className="login-alternatives">
+            <button type="button" onClick={() => changeMode('reference')}><Fingerprint size={14} /> Look up a pass with Reference ID</button>
+            <span>New visitor? <button type="button" onClick={() => changeMode('register')}>Create a profile</button></span>
+          </div>}
+          {(mode === 'reference' || mode === 'register') && <button className="auth-back-link" type="button" onClick={() => changeMode('login')}><ArrowRight size={13} /> Back to sign in</button>}
+          {mode === 'login' && import.meta.env.DEV && <div className="demo-access">
             <div className="demo-heading"><span className="demo-icon"><CircleHelp size={17} /></span><div><strong>Prototype demo accounts</strong><span>Choose a workspace to prefill sign-in.</span></div></div>
             <div className="demo-buttons">
               <button type="button" className={email === FACILITIES_EMAIL ? 'selected' : ''} onClick={() => { setEmail(FACILITIES_EMAIL); setPassword(DEMO_PASSWORD); }}>Facilities officer</button>
@@ -213,8 +219,12 @@ function Sidebar({ staff, section, setSection, onNewPass, mobileOpen, closeMobil
   );
 }
 
-function StatCard({ icon: Icon, label, value, note, tone }) {
-  return <article className={`stat-card stat-${tone}`}><div className="stat-top"><span className="stat-icon"><Icon size={18} /></span><span className="stat-note">{note}</span></div><div className="stat-value">{value}</div><div className="stat-label">{label}</div></article>;
+function StatCard({ icon: Icon, label, value, note, tone, onClick }) {
+  return <button type="button" className={`stat-card stat-${tone}`} onClick={onClick} aria-label={`${label}: ${value}. ${note}. Open details`}>
+    <span className="stat-top"><span className="stat-icon"><Icon size={18} /></span><span className="stat-note">{note}</span><ChevronRight className="stat-chevron" size={15} /></span>
+    <span className="stat-value">{value}</span><span className="stat-label">{label}</span>
+    <span className="stat-expand-hint">Open snapshot <ArrowRight size={12} /></span>
+  </button>;
 }
 
 function ActivityList({ logs, onPass }) {
@@ -226,14 +236,50 @@ function ActivityList({ logs, onPass }) {
   </button>)}</div>;
 }
 
+function InsightDrawer({ insight, onClose, onOpenPass, onOpenReference }) {
+  return <>
+    <button className="drawer-scrim insight-scrim" onClick={onClose} aria-label="Close metric details" />
+    <aside className="detail-drawer insight-drawer" role="dialog" aria-modal="true" aria-labelledby="insight-title" tabIndex="-1">
+      <header className="insight-drawer-header">
+        <div><span className="eyebrow">OPERATIONS SNAPSHOT</span><button className="drawer-close" onClick={onClose} aria-label="Close metric details"><X size={19} /></button></div>
+        <p>LIVE METRIC</p>
+        <h2 id="insight-title">{insight.label}</h2>
+        <strong className="insight-value">{insight.value}</strong>
+        <span className="insight-description">{insight.description}</span>
+      </header>
+      <div className="drawer-content insight-content">
+        <div className="section-title-row"><h3>{insight.listTitle}</h3><span className="count-chip">{insight.passes.length.toString().padStart(2, '0')}</span></div>
+        {insight.passes.length ? <div className="insight-pass-list">{insight.passes.map((pass) => <button className="insight-pass-row" key={pass.passId} onClick={() => onOpenPass(pass.passId)}>
+          <Avatar name={pass.fullName} small />
+          <span><strong>{pass.fullName}</strong><small>{pass.referenceId || 'Reference pending'} · {pass.hostDepartment}</small></span>
+          <StatusPill status={getValidity(pass).label} />
+          <ChevronRight size={15} />
+        </button>)}</div> : <div className="insight-empty"><Activity size={18} /><span>No matching pass records in the latest register.</span></div>}
+        {insight.logs.length > 0 && <div className="insight-recent"><span className="eyebrow">LATEST GATE ACTIVITY</span><ActivityList logs={insight.logs.slice(0, 4)} onPass={onOpenReference} /></div>}
+      </div>
+    </aside>
+  </>;
+}
+
 function localDateTime(value) {
   const date = new Date(value);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-function Overview({ staff, summary, passes, onOpenPass, onPass, onNewPass, loading, query, setQuery, onSearch }) {
+function Overview({ staff, summary, passes, onOpenPass, onPass, onNewPass, onInsight, loading, query, setQuery, onSearch }) {
   const isFacilities = staff.role === 'Facilities Officer';
   const currentPasses = passes.filter((pass) => ['Approved', 'Pending'].includes(pass.approvalStatus)).slice(0, 5);
+  const recentLogs = summary?.recentLogs || [];
+  const todaysPasses = passes.filter((pass) => pass.createdAt && new Date(pass.createdAt).toDateString() === new Date().toDateString());
+  const activePasses = passes.filter((pass) => getValidity(pass).className === 'active');
+  const pendingPasses = passes.filter((pass) => pass.approvalStatus === 'Pending');
+  const latestGuestPasses = passes.slice(0, 8);
+  const metrics = [
+    { key: 'today', icon: Users, label: 'Visitors today', value: summary?.today ?? '—', note: 'All registrations', tone: 'blue', description: 'Guest visit registrations created today.', listTitle: "Today's registrations", passes: todaysPasses },
+    { key: 'active', icon: BadgeCheck, label: 'Active passes', value: summary?.active ?? '—', note: 'Valid right now', tone: 'green', description: 'Approved passes currently inside their access window.', listTitle: 'Active passes', passes: activePasses },
+    { key: 'pending', icon: Clock3, label: 'Awaiting approval', value: summary?.pending ?? '—', note: isFacilities ? 'Needs your review' : 'Facilities review', tone: 'amber', description: 'Visit requests that are waiting for a facilities decision.', listTitle: 'Pending requests', passes: pendingPasses },
+    { key: 'guests', icon: Fingerprint, label: 'Registered guests', value: summary?.guests ?? '—', note: 'All time', tone: 'purple', description: 'Recent visit records from guests registered with SAGE.', listTitle: 'Recent guest visits', passes: latestGuestPasses },
+  ];
   return (
     <>
       <div className="welcome-row">
@@ -242,10 +288,7 @@ function Overview({ staff, summary, passes, onOpenPass, onPass, onNewPass, loadi
       </div>
       {!isFacilities && <section className="scanner-card"><div className="scanner-mark"><Fingerprint size={21} /></div><div className="scanner-copy"><span className="eyebrow">GATE SCANNER</span><strong>Find a visitor pass</strong><small>Search by reference ID or visitor’s full name.</small></div><form onSubmit={onSearch}><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. SAGE-2026-7K4P2M9Q or guest name" aria-label="Find a visitor pass" /><button className="button button-primary" type="submit"><span>Search passes</span><ArrowRight size={15} /></button></form><span className="scanner-live"><span className="live-dot" /> LIVE LOOKUP</span></section>}
       <section className="stat-grid">
-        <StatCard icon={Users} label="Visitors today" value={summary?.today ?? '—'} note="All registrations" tone="blue" />
-        <StatCard icon={BadgeCheck} label="Active passes" value={summary?.active ?? '—'} note="Valid right now" tone="green" />
-        <StatCard icon={Clock3} label="Awaiting approval" value={summary?.pending ?? '—'} note={isFacilities ? 'Needs your review' : 'Facilities review'} tone="amber" />
-        <StatCard icon={Fingerprint} label="Registered guests" value={summary?.guests ?? '—'} note="All time" tone="purple" />
+        {metrics.map(({ key, ...metric }) => <StatCard key={key} {...metric} onClick={() => onInsight({ ...metric, logs: recentLogs })} />)}
       </section>
       <section className="dashboard-grid">
         <article className="panel pass-panel">
@@ -382,8 +425,8 @@ function PassDetail({ pass, staff, onClose, onChanged, setNotice }) {
     }
   }
 
-  return <><button className="drawer-scrim" onClick={onClose} aria-label="Close pass details" /><aside className="detail-drawer">
-    <div className="drawer-top"><div><span className="eyebrow">PASS DETAILS</span><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="drawer-person"><Avatar name={pass.fullName} /><div><h2>{pass.fullName}</h2><p>{pass.affiliation || 'Independent visitor'} <span>·</span> {pass.govIdType}</p></div></div>
+  return <><button className="drawer-scrim" onClick={onClose} aria-label="Close pass details" />  <aside className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="pass-drawer-title" tabIndex="-1">
+    <div className="drawer-top"><div><span className="eyebrow">PASS DETAILS</span><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="drawer-person"><Avatar name={pass.fullName} /><div><h2 id="pass-drawer-title">{pass.fullName}</h2><p>{pass.affiliation || 'Independent visitor'} <span>·</span> {pass.govIdType}</p></div></div>
       <div className="drawer-reference">{pass.referenceId ? <><span>REFERENCE ID</span><strong>{pass.referenceId}</strong><button className="copy-button" onClick={() => navigator.clipboard?.writeText(pass.referenceId).then(() => setNotice('Reference ID copied.'))}>Copy</button></> : <><span>REFERENCE ID</span><strong className="muted-cell">Assigned on approval</strong></>}</div>
     </div>
     <div className="drawer-content">
@@ -476,11 +519,14 @@ function Toast({ notice, onDismiss }) {
 
 export default function App() {
   const [staff, setStaff] = useState(null);
+  const [referencePass, setReferencePass] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem('sage-theme') === 'light' ? 'light' : 'dark');
   const [checkingSession, setCheckingSession] = useState(true);
   const [section, setSection] = useState('overview');
   const [summary, setSummary] = useState(null);
   const [passes, setPasses] = useState([]);
   const [selectedPass, setSelectedPass] = useState(null);
+  const [selectedInsight, setSelectedInsight] = useState(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -488,7 +534,50 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notice, setNoticeState] = useState(null);
   const isFacilities = staff?.role === 'Facilities Officer';
+  const dialogKey = selectedPass ? 'pass' : selectedInsight ? 'insight' : showForm ? 'form' : null;
   const setNotice = useCallback((text, error = false) => setNoticeState({ text, error }), []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('sage-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!dialogKey) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
+    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+    document.body.style.overflow = 'hidden';
+    dialog?.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setSelectedPass(null);
+        setSelectedInsight(null);
+        setShowForm(false);
+        return;
+      }
+      if (event.key === 'Tab' && dialog) {
+        const focusable = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')]
+          .filter((element) => element.offsetParent !== null);
+        if (!focusable.length) {
+          event.preventDefault();
+          dialog.focus();
+        } else if (event.shiftKey && document.activeElement === focusable[0]) {
+          event.preventDefault();
+          focusable.at(-1).focus();
+        } else if (!event.shiftKey && document.activeElement === focusable.at(-1)) {
+          event.preventDefault();
+          focusable[0].focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [dialogKey]);
 
   const loadSummary = useCallback(async () => {
     const result = await api('/api/summary');
@@ -548,6 +637,7 @@ export default function App() {
   const logs = useMemo(() => summary?.recentLogs || [], [summary]);
 
   async function openPass(passId) {
+    setSelectedInsight(null);
     if (!passId) {
       setSection('movements');
       return;
@@ -578,20 +668,31 @@ export default function App() {
   }
 
   function onLogin(nextStaff) {
+    setReferencePass(null);
     setStaff(nextStaff);
     setSection('overview');
     setNotice(`Welcome back, ${nextStaff.fullName.split(' ')[0]}.`);
   }
 
   function onGuestLogin(guest) {
+    setReferencePass(null);
     setStaff(guest);
     setNotice(`Welcome, ${guest.fullName.split(' ')[0]}. Your visitor portal is ready.`);
   }
 
+  function onReferenceLookup(result) {
+    setReferencePass(result.pass);
+    setStaff(result.guest);
+    setNotice(`Visitor pass found for ${result.guest.fullName}.`);
+  }
+
   async function logout() {
     try {
-      await api(staff?.role === 'Guest / Visitor' ? '/api/guest/auth/logout' : '/api/auth/logout', { method: 'POST' });
+      if (!referencePass) {
+        await api(staff?.role === 'Guest / Visitor' ? '/api/guest/auth/logout' : '/api/auth/logout', { method: 'POST' });
+      }
       setStaff(null);
+      setReferencePass(null);
       setSummary(null);
       setSelectedPass(null);
       setQuery('');
@@ -616,24 +717,26 @@ export default function App() {
     setSection('passes');
   }
 
-  if (checkingSession) return <div className="app-loading"><span className="brand-mark"><ShieldCheck size={22} /></span><span>Preparing secure workspace…</span></div>;
-  if (!staff) return <><Login onLogin={onLogin} onGuestLogin={onGuestLogin} /><Toast notice={notice} onDismiss={() => setNoticeState(null)} /></>;
+  if (checkingSession) return <><div className="app-loading"><span className="brand-mark"><ShieldCheck size={22} /></span><span>Preparing secure workspace…</span></div><ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')} /></>;
+  if (!staff) return <><Login onLogin={onLogin} onGuestLogin={onGuestLogin} onReferenceLookup={onReferenceLookup} theme={theme} onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')} /><Toast notice={notice} onDismiss={() => setNoticeState(null)} /></>;
   if (staff.role === 'Guest / Visitor') {
-    return <><GuestPortal guest={staff} onLogout={logout} setNotice={setNotice} /><Toast notice={notice} onDismiss={() => setNoticeState(null)} /></>;
+    return <><GuestPortal guest={staff} onLogout={logout} setNotice={setNotice} referencePass={referencePass} /><ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')} /><Toast notice={notice} onDismiss={() => setNoticeState(null)} /></>;
   }
   return <div className="app-shell">
     <Sidebar staff={staff} section={section} setSection={setSection} onNewPass={() => setShowForm(true)} mobileOpen={mobileOpen} closeMobile={() => setMobileOpen(false)} />
     <main className="main-shell">
       <Topbar staff={staff} query={query} setQuery={setQuery} onSearch={submitSearch} onNewPass={() => setShowForm(true)} onLogout={logout} isFacilities={isFacilities} onMobileMenu={() => setMobileOpen(true)} />
       <div className="page-content">
-        {section === 'overview' && <Overview staff={staff} summary={summary} passes={passes} onOpenPass={(id) => id ? openPass(id) : setSection('passes')} onPass={openByReference} onNewPass={() => setShowForm(true)} loading={loading} query={query} setQuery={setQuery} onSearch={submitSearch} />}
+        {section === 'overview' && <Overview staff={staff} summary={summary} passes={passes} onOpenPass={(id) => id ? openPass(id) : setSection('passes')} onPass={openByReference} onNewPass={() => setShowForm(true)} onInsight={setSelectedInsight} loading={loading} query={query} setQuery={setQuery} onSearch={submitSearch} />}
         {section === 'passes' && <PassesPage passes={passes} loading={loading} query={query} onSearch={submitSearch} onOpenPass={openPass} onNewPass={() => setShowForm(true)} isFacilities={isFacilities} />}
         {section === 'movements' && <MovementsPage logs={logs} onPass={openByReference} isFacilities={isFacilities} />}
       </div>
       <footer className="app-footer"><span>© 2026 SAGE campus access</span><span><span className="footer-shield"><ShieldCheck size={13} /></span> Staff-only system <span className="footer-separator">·</span> Data is securely stored</span></footer>
     </main>
     {selectedPass && <PassDetail pass={selectedPass} staff={staff} onClose={() => setSelectedPass(null)} onChanged={updatePass} setNotice={setNotice} />}
+    {selectedInsight && <InsightDrawer insight={selectedInsight} onClose={() => setSelectedInsight(null)} onOpenPass={openPass} onOpenReference={openByReference} />}
     {showForm && <PassForm onClose={() => setShowForm(false)} onCreated={createdPass} setNotice={setNotice} />}
+    <ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'dark' ? 'light' : 'dark')} />
     <Toast notice={notice} onDismiss={() => setNoticeState(null)} />
   </div>;
 }

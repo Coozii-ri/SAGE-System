@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { db } from './db.js';
+import { seedDemoAccounts } from './seed.js';
 import { SQLiteSessionStore } from './session-store.js';
 
 const app = express();
@@ -346,6 +347,45 @@ app.get('/api/guest/passes', requireGuest, (req, res) => {
   res.json({ passes: passIds.map(({ PassID }) => getPass(PassID)) });
 });
 
+app.get('/api/guest/passes/reference/:referenceId', (req, res) => {
+  const referenceId = req.params.referenceId.trim();
+  if (!referenceId || referenceId.length > 64) {
+    res.status(400).json({ error: 'Enter a valid visitor Reference ID.' });
+    return;
+  }
+  const passId = db.prepare(`
+    SELECT PassID FROM GatePass WHERE ReferenceID = ? COLLATE NOCASE
+  `).get(referenceId)?.PassID;
+  if (!passId) {
+    res.status(404).json({ error: 'No visitor pass was found for that Reference ID.' });
+    return;
+  }
+  const pass = getPass(passId);
+  res.json({
+    guest: {
+      fullName: pass.fullName,
+      affiliation: pass.affiliation,
+      role: 'Guest / Visitor',
+    },
+    pass: {
+      passId: pass.passId,
+      referenceId: pass.referenceId,
+      hostDepartment: pass.hostDepartment,
+      purpose: pass.purpose,
+      validFrom: pass.validFrom,
+      validUntil: pass.validUntil,
+      approvalStatus: pass.approvalStatus,
+      createdAt: pass.createdAt,
+      assets: pass.assets.map(({ assetId, itemDescription, serialNumber, clearanceStatus }) => ({
+        assetId,
+        itemDescription,
+        serialNumber,
+        clearanceStatus,
+      })),
+    },
+  });
+});
+
 app.get('/api/guest/passes/:id', requireGuest, (req, res) => {
   const passId = Number(req.params.id);
   if (!Number.isSafeInteger(passId) || passId < 1) {
@@ -373,8 +413,22 @@ app.post('/api/auth/login', async (req, res, next) => {
       SELECT StaffID, FullName, Email, Role, AccountStatus, PasswordHash
       FROM StaffAccount WHERE Email = ? COLLATE NOCASE
     `).get(result.data.email);
-    const validPassword = staff && await bcrypt.compare(result.data.password, staff.PasswordHash);
-    if (!staff || !validPassword || staff.AccountStatus !== 'Active') {
+    if (staff && staff.AccountStatus === 'Active' && await bcrypt.compare(result.data.password, staff.PasswordHash)) {
+      req.session.regenerate((error) => {
+        if (error) {
+          next(error);
+          return;
+        }
+        req.session.staffId = staff.StaffID;
+        res.json({ staff: publicStaff(staff) });
+      });
+      return;
+    }
+
+    const guest = db.prepare(`
+      SELECT * FROM Guest WHERE Email = ? COLLATE NOCASE AND PasswordHash IS NOT NULL
+    `).get(result.data.email);
+    if (!guest || guest.AccountStatus !== 'Active' || !await bcrypt.compare(result.data.password, guest.PasswordHash)) {
       res.status(401).json({ error: 'Email or password is incorrect.' });
       return;
     }
@@ -383,8 +437,8 @@ app.post('/api/auth/login', async (req, res, next) => {
         next(error);
         return;
       }
-      req.session.staffId = staff.StaffID;
-      res.json({ staff: publicStaff(staff) });
+      req.session.guestId = guest.GuestID;
+      res.json({ guest: publicGuest(guest) });
     });
   } catch (error) {
     next(error);
@@ -673,9 +727,15 @@ app.post('/api/passes/:id/logs', requireAuth, allowRoles('Facilities Officer', '
   res.status(201).json({ logId: Number(log.lastInsertRowid), timestamp: new Date().toISOString() });
 });
 
-app.use((error, _req, res, _next) => {
-  console.error(error);
-  res.status(500).json({ error: 'An unexpected server error occurred.' });
+app.use((error, req, res, _next) => {
+  console.error(`Request failed: ${req.method} ${req.path}`, error);
+  const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 500
+    ? error.status
+    : 500;
+  const message = status < 500 || !isProduction
+    ? error.message
+    : 'The server could not complete this request. Please retry; the failure was logged.';
+  res.status(status).json({ error: message });
 });
 
 if (isProduction) {
@@ -683,59 +743,15 @@ if (isProduction) {
   app.get('/{*path}', (_req, res) => res.sendFile(path.join(projectDirectory, 'dist', 'index.html')));
 }
 
-async function seedDemoAccounts() {
-  if (isProduction || process.env.SAGE_SEED_DEMO === 'false') return;
-  const count = db.prepare('SELECT COUNT(*) AS count FROM StaffAccount').get().count;
-  if (count > 0) return;
-  const demoPassword = process.env.SAGE_DEMO_PASSWORD || 'SageDemo2026!';
-  const passwordHash = await bcrypt.hash(demoPassword, 10);
-  const insert = db.prepare(`
-    INSERT INTO StaffAccount (FullName, Email, Role, PasswordHash)
-    VALUES (?, ?, ?, ?)
-  `);
-  const addAccounts = db.transaction(() => {
-    insert.run('Jordan Ellis', 'facilities@sage.campus', 'Facilities Officer', passwordHash);
-    insert.run('Morgan Chen', 'guard@sage.campus', 'Campus Security Guard', passwordHash);
-  });
-  addAccounts();
-
-  const guestId = db.prepare(`
-    INSERT INTO Guest (FullName, Affiliation, ContactNumber, GovID_Type)
-    VALUES ('Amara Okafor', 'Northstar Research', '+1 (555) 018-2840', 'Driver license')
-  `).run().lastInsertRowid;
-  const validFrom = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const validUntil = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
-  const passId = db.prepare(`
-    INSERT INTO GatePass (
-      GuestID, ReferenceID, HostDepartment, Purpose, ValidFrom, ValidUntil,
-      ApprovalStatus, ApprovedBy, ApprovedAt
-    )     VALUES (?, ?, 'Research & Innovation', 'Equipment demonstration', ?, ?, 'Approved', 1, ?)
-  `).run(
-    guestId,
-    `SAGE-${new Date().getUTCFullYear()}-7K4P2M9Q`,
-    validFrom,
-    validUntil,
-    new Date().toISOString(),
-  ).lastInsertRowid;
-  db.prepare(`
-    INSERT INTO AssetEntry (PassID, ItemDescription, SerialNumber, ClearanceStatus)
-    VALUES (?, 'Portable thermal camera', 'TC-8841-AX', 'Cleared')
-  `).run(passId);
-  const pendingGuest = db.prepare(`
-    INSERT INTO Guest (FullName, Affiliation, ContactNumber, GovID_Type)
-    VALUES ('Elliot Park', 'Blue Oak Consulting', '+1 (555) 013-7742', 'Passport')
-  `).run().lastInsertRowid;
-  db.prepare(`
-    INSERT INTO GatePass (GuestID, HostDepartment, Purpose, ValidFrom, ValidUntil)
-    VALUES (?, 'Campus Planning', 'Site review and measurements', ?, ?)
-  `).run(
-    pendingGuest,
-    new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    new Date(Date.now() + 30 * 60 * 60 * 1000).toISOString(),
-  );
+if (!isProduction && process.env.SAGE_SEED_DEMO !== 'false') {
+  try {
+    await seedDemoAccounts(db, process.env.SAGE_DEMO_PASSWORD || 'SageDemo2026!');
+  } catch (error) {
+    console.error('SAGE startup failed while initializing demo accounts:', error);
+    db.close();
+    process.exit(1);
+  }
 }
-
-await seedDemoAccounts();
 const cleanupTimer = setInterval(() => {
   try {
     db.prepare('DELETE FROM SessionStore WHERE ExpiresAt <= ?').run(Date.now());

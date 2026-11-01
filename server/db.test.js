@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrateDatabase } from './migrate.js';
+import { seedDemoAccounts } from './seed.js';
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 let db;
@@ -94,4 +95,52 @@ test('reference IDs are unique and gate logs require a registered staff member',
   assert.throws(() => db.prepare(`
     INSERT INTO GateLog (PassID, StaffID, Direction) VALUES (?, 999, 'OUT')
   `).run(passId), /FOREIGN KEY constraint failed/);
+});
+
+test('empty local databases receive staff and visitor demo accounts exactly once', async () => {
+  const seedDb = new Database(':memory:');
+  seedDb.pragma('foreign_keys = ON');
+  migrateDatabase(seedDb);
+  await seedDemoAccounts(seedDb, 'SageDemo2026!');
+  await seedDemoAccounts(seedDb, 'SageDemo2026!');
+
+  const staff = seedDb.prepare('SELECT Email, Role FROM StaffAccount ORDER BY Email').all();
+  assert.deepEqual(staff, [
+    { Email: 'facility@feu.edu.ph', Role: 'Facilities Officer' },
+    { Email: 'guard@feu.edu.ph', Role: 'Campus Security Guard' },
+  ]);
+  const visitor = seedDb.prepare(`
+    SELECT Email, PasswordHash FROM Guest WHERE Email = 'visitor@feu.edu.ph'
+  `).get();
+  assert.ok(visitor);
+  assert.notEqual(visitor.PasswordHash, 'SageDemo2026!');
+  assert.equal(seedDb.prepare('SELECT COUNT(*) AS count FROM GatePass').get().count, 2);
+  seedDb.close();
+});
+
+test('legacy local demo credentials upgrade to the documented FEU accounts', async () => {
+  const legacyDb = new Database(':memory:');
+  legacyDb.pragma('foreign_keys = ON');
+  migrateDatabase(legacyDb);
+  const insertStaff = legacyDb.prepare(`
+    INSERT INTO StaffAccount (FullName, Email, Role, PasswordHash) VALUES (?, ?, ?, 'legacy-hash')
+  `);
+  insertStaff.run('Jordan Ellis', 'facilities@sage.campus', 'Facilities Officer');
+  insertStaff.run('Morgan Chen', 'guard@sage.campus', 'Campus Security Guard');
+  legacyDb.prepare(`
+    INSERT INTO Guest (FullName, Affiliation, ContactNumber, GovID_Type)
+    VALUES ('Amara Okafor', 'Northstar Research', '+1 (555) 018-2840', 'Driver license')
+  `).run();
+
+  await seedDemoAccounts(legacyDb, 'SageDemo2026!');
+  assert.deepEqual(
+    legacyDb.prepare('SELECT Email FROM StaffAccount ORDER BY Email').all().map(({ Email }) => Email),
+    ['facility@feu.edu.ph', 'guard@feu.edu.ph'],
+  );
+  const visitor = legacyDb.prepare(`
+    SELECT Email, PasswordHash FROM Guest WHERE FullName = 'Amara Okafor'
+  `).get();
+  assert.equal(visitor.Email, 'visitor@feu.edu.ph');
+  assert.notEqual(visitor.PasswordHash, null);
+  legacyDb.close();
 });

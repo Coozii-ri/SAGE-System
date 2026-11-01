@@ -1,38 +1,46 @@
 # SAGE — Secure Access for Guests & Equipment
 
-A responsive, dark-mode campus visitor and equipment pass prototype. The workspace includes a React/Vite staff and visitor interface, an Express API, SQLite persistence, QR-coded digital passes, and versioned migrations for guests, visitor accounts, passes, equipment, staff, gate logs, and sessions.
+A responsive campus visitor and equipment pass prototype with an immersive ocean-tech interface. The workspace includes a React/Vite staff and visitor interface, an Express API, SQLite persistence, QR-coded digital passes, and versioned migrations for guests, visitor accounts, passes, equipment, staff, gate logs, and sessions.
 
 ## Run locally
 
 Requirements: Node.js 20.19+ or 22.12+.
 
-```sh
+1. Open the project folder in VS Code.
+2. In **Terminal 1**, install dependencies and start the API:
+
+```powershell
 npm install
 npm run server
 ```
 
-In a second terminal:
+The API listens on port `3001`. On first boot it creates `data/` and `data/sage.sqlite` if needed, applies database migrations, and seeds local demo accounts when the staff and visitor tables are empty.
 
-```sh
+3. Open **Terminal 2** and start the Vite frontend:
+
+```powershell
 npm run dev
 ```
 
 Open the Vite URL printed in the terminal (normally `http://localhost:5173`). The Vite development server proxies `/api` requests to `http://localhost:3001`.
 
-The database is created at `data/sage.sqlite` on first start. Set `SAGE_DB_PATH` to use a different file.
+If the frontend reports a network or API error, confirm Terminal 1 still shows `SAGE API listening on http://localhost:3001`, then check `http://localhost:3001/api/health` for `{"status":"ok"}`. Server-side failures are logged in Terminal 1; API errors are returned as JSON.
 
 ## Prototype accounts
 
-Demo accounts are seeded only when the database has no staff accounts and `NODE_ENV` is not `production`:
+Local demo accounts are seeded when the corresponding tables are empty and `NODE_ENV` is not `production`:
 
 | Role | Email |
 |---|---|
-| Facilities Officer | `facilities@sage.campus` |
-| Campus Security Guard | `guard@sage.campus` |
+| Facilities Officer | `facility@feu.edu.ph` |
+| Campus Security Guard | `guard@feu.edu.ph` |
+| Guest / Visitor | `visitor@feu.edu.ph` |
 
-Both use `SageDemo2026!` by default. Override the seed password with `SAGE_DEMO_PASSWORD`, or set `SAGE_SEED_DEMO=false` to disable demo seeding. The demo credentials and seeded records are for local prototyping only.
+All three use `SageDemo2026!` by default. Override the seed password with `SAGE_DEMO_PASSWORD`, or set `SAGE_SEED_DEMO=false` to disable demo seeding. The demo credentials and seeded records are for local prototyping only. Set `SAGE_DB_PATH` to use a different SQLite file.
 
-Visitors can create their own account from **Visitor access** on the sign-in screen. Visitor profiles are independent from staff accounts; profile passwords are bcrypt-hashed, and each visitor can only list or retrieve passes belonging to their account. Guest pass approval status refreshes automatically while the portal is open.
+The sign-in screen uses one email-and-password form for both staff and visitor accounts. The API identifies the account type after validating credentials and routes staff to the operations console or visitors to their personal pass dashboard. Visitors can create an account from the sign-in screen, or look up a pass using its Reference ID for a read-only digital pass view. Reference lookups expose only the pass holder's name, affiliation, pass details, and registered equipment. Signed-in visitor profiles are independent from staff accounts; profile passwords are bcrypt-hashed, and each visitor can only list or retrieve passes belonging to their account. Guest pass approval status refreshes automatically while the portal is open.
+
+The interface uses the ocean-tech palette: deepest midnight `#021024`, midnight navy `#052659`, steel blue `#5483B3`, misted ice blue `#7DA0CA`, and soft glowing cyan-white `#C1E8FF`. The login is a full-screen hero with a slow ambient background and a frosted glass sign-in panel.
 
 ## Production build
 
@@ -52,7 +60,7 @@ Sessions are persisted in SQLite. Staff endpoints require an authenticated staff
 | Method | Route | Access | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | Public | Health check |
-| `POST` | `/api/auth/login` | Public | Create a staff session |
+| `POST` | `/api/auth/login` | Public | Authenticate staff or visitor credentials and create the matching session |
 | `POST` | `/api/auth/logout` | Signed in | End the current session |
 | `GET` | `/api/auth/session` | Signed in | Current staff identity and role |
 | `POST` | `/api/guest/auth/register` | Public | Create a visitor profile and session |
@@ -62,6 +70,7 @@ Sessions are persisted in SQLite. Staff endpoints require an authenticated staff
 | `POST` | `/api/guest/passes` | Visitor | Submit a visit and equipment request |
 | `GET` | `/api/guest/passes` | Visitor | List the signed-in visitor’s passes |
 | `GET` | `/api/guest/passes/:id` | Visitor | Retrieve an owned visitor pass |
+| `GET` | `/api/guest/passes/reference/:referenceId` | Public | Read-only lookup of a pass by its Reference ID |
 | `GET` | `/api/summary` | Staff | Dashboard counts and recent movements |
 | `GET` | `/api/passes?q=` | Staff | Search by exact reference ID or guest name |
 | `GET` | `/api/passes/:id` | Staff | Pass, guest, equipment, and movement details |
