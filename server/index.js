@@ -11,6 +11,7 @@ import { db } from './db.js';
 import { sendEmail } from './email.js';
 import { seedDemoAccounts } from './seed.js';
 import { SQLiteSessionStore } from './session-store.js';
+import { bootstrapStaffAccounts, getStaffAccountsFromEnvironment } from './staff-bootstrap.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
