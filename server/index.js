@@ -3,6 +3,7 @@ import express from 'express';
 import QRCode from 'qrcode';
 import session from 'express-session';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -857,9 +858,10 @@ app.use((error, req, res, _next) => {
   res.status(status).json({ error: message });
 });
 
-if (isProduction) {
-  app.use(express.static(path.join(projectDirectory, 'dist')));
-  app.get('/{*path}', (_req, res) => res.sendFile(path.join(projectDirectory, 'dist', 'index.html')));
+const frontendBuildDirectory = path.join(projectDirectory, 'dist');
+if (isProduction && existsSync(path.join(frontendBuildDirectory, 'index.html'))) {
+  app.use(express.static(frontendBuildDirectory));
+  app.get('/{*path}', (_req, res) => res.sendFile(path.join(frontendBuildDirectory, 'index.html')));
 }
 
 if (!isProduction && process.env.SAGE_SEED_DEMO !== 'false') {
