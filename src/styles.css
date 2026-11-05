@@ -38,7 +38,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .app-shell { min-height: 100vh; }
 .sidebar { background: var(--navy); color: #eaf0f2; position: fixed; inset: 0 auto 0 0; width: 252px; z-index: 20; display: flex; flex-direction: column; padding: 27px 16px 18px; }
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 29px; }
-.brand-mark { width: 35px; height: 35px; border-radius: 11px; display: grid; place-items: center; color: #fff; background: #128d7e; flex: 0 0 auto; }
+.brand-mark { width: 35px; height: 35px; border-radius: 11px; display: grid; place-items: center; color: #fff; background: #052659; flex: 0 0 auto; }
 .brand-name { font-family: Manrope, sans-serif; font-size: 15px; letter-spacing: 1.5px; font-weight: 800; line-height: 1.2; }
 .brand-name small { display: block; color: #9cabb4; font-family: 'DM Sans', sans-serif; font-size: 10px; letter-spacing: .3px; font-weight: 400; margin-top: 3px; }
 .sidebar-close, .mobile-menu { display: none; }
