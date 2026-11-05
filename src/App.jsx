@@ -96,7 +96,7 @@ function Login({ onLogin, onGuestLogin, onReferenceLookup, theme, onToggleTheme 
         body: JSON.stringify(body),
       });
       if (result.staff) onLogin(result.staff);
-      else onGuestLogin(result.guest);
+      else onGuestLogin(result.guest, mode === 'register' ? result.emailSent : undefined);
     } catch (loginError) {
       setError(loginError.message);
     } finally {
@@ -457,7 +457,7 @@ function PassForm({ onClose, onCreated, setNotice }) {
   start.setMinutes(Math.ceil(start.getMinutes() / 15) * 15, 0, 0);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
   const [values, setValues] = useState({
-    fullName: '', affiliation: '', contactNumber: '', govIdType: '',
+    fullName: '', email: '', affiliation: '', contactNumber: '', govIdType: '',
     hostDepartment: '', purpose: '',
     validFrom: new Date(start.getTime() - start.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
     validUntil: new Date(end.getTime() - end.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
@@ -476,7 +476,7 @@ function PassForm({ onClose, onCreated, setNotice }) {
       const payload = {
         guest: {
           fullName: values.fullName, affiliation: values.affiliation,
-          contactNumber: values.contactNumber, govIdType: values.govIdType,
+          email: values.email, contactNumber: values.contactNumber, govIdType: values.govIdType,
         },
         hostDepartment: values.hostDepartment, purpose: values.purpose,
         validFrom: new Date(values.validFrom).toISOString(),
@@ -485,7 +485,12 @@ function PassForm({ onClose, onCreated, setNotice }) {
       };
       const result = await api('/api/passes', { method: 'POST', body: JSON.stringify(payload) });
       onCreated(result.pass);
-      setNotice('Pass registered and sent for approval.');
+      setNotice(
+        result.emailSent
+          ? 'Pass submitted for approval. A confirmation email was sent to the guest.'
+          : 'Pass submitted, but the guest confirmation email could not be sent.',
+        !result.emailSent,
+      );
       onClose();
     } catch (requestError) {
       setError(requestError.message);
@@ -497,7 +502,7 @@ function PassForm({ onClose, onCreated, setNotice }) {
     <div className="modal-header"><div><span className="eyebrow">VISITOR REGISTRATION</span><h2 id="new-pass-title">Create a new pass</h2><p>Register a guest and submit their visit for approval.</p></div><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
     <form onSubmit={submit} className="pass-form">
       <div className="form-section"><div className="form-section-heading"><span className="form-section-number">01</span><div><strong>Guest information</strong><small>Verify these details against a government-issued ID.</small></div></div>
-        <div className="form-grid"><label>Full name<input required minLength="2" maxLength="120" value={values.fullName} onChange={(event) => update('fullName', event.target.value)} placeholder="As shown on photo ID" /></label><label>Affiliation <span className="optional">(optional)</span><input maxLength="120" value={values.affiliation} onChange={(event) => update('affiliation', event.target.value)} placeholder="Organization or institution" /></label><label>Contact number<input required minLength="5" maxLength="40" value={values.contactNumber} onChange={(event) => update('contactNumber', event.target.value)} placeholder="+1 (555) 000-0000" /></label><label>Government ID type<input required minLength="2" maxLength="60" value={values.govIdType} onChange={(event) => update('govIdType', event.target.value)} placeholder="Passport, driver license…" /></label></div>
+        <div className="form-grid"><label>Full name<input required minLength="2" maxLength="120" value={values.fullName} onChange={(event) => update('fullName', event.target.value)} placeholder="As shown on photo ID" /></label><label>Email address<input required type="email" maxLength="254" value={values.email} onChange={(event) => update('email', event.target.value)} placeholder="guest@example.com" /></label><label>Affiliation <span className="optional">(optional)</span><input maxLength="120" value={values.affiliation} onChange={(event) => update('affiliation', event.target.value)} placeholder="Organization or institution" /></label><label>Contact number<input required minLength="5" maxLength="40" value={values.contactNumber} onChange={(event) => update('contactNumber', event.target.value)} placeholder="+1 (555) 000-0000" /></label><label>Government ID type<input required minLength="2" maxLength="60" value={values.govIdType} onChange={(event) => update('govIdType', event.target.value)} placeholder="Passport, driver license…" /></label></div>
       </div>
       <div className="form-section"><div className="form-section-heading"><span className="form-section-number">02</span><div><strong>Visit details</strong><small>Set a strict time window for campus access.</small></div></div>
         <div className="form-grid"><label>Host department<input required minLength="2" maxLength="100" value={values.hostDepartment} onChange={(event) => update('hostDepartment', event.target.value)} placeholder="e.g. Research & Innovation" /></label><label>Purpose of visit<input required minLength="3" maxLength="500" value={values.purpose} onChange={(event) => update('purpose', event.target.value)} placeholder="Brief reason for the visit" /></label><label>Valid from<input required type="datetime-local" value={values.validFrom} onChange={(event) => update('validFrom', event.target.value)} /></label><label>Valid until<input required type="datetime-local" value={values.validUntil} onChange={(event) => update('validUntil', event.target.value)} /></label></div>
@@ -679,10 +684,18 @@ export default function App() {
     setNotice(`Welcome back, ${nextStaff.fullName.split(' ')[0]}.`);
   }
 
-  function onGuestLogin(guest) {
+  function onGuestLogin(guest, welcomeEmailSent) {
     setReferencePass(null);
     setStaff(guest);
-    setNotice(`Welcome, ${guest.fullName.split(' ')[0]}. Your visitor portal is ready.`);
+    const firstName = guest.fullName.split(' ')[0];
+    setNotice(
+      welcomeEmailSent === false
+        ? `Your account was created, but the welcome email could not be sent.`
+        : welcomeEmailSent === true
+          ? `Welcome, ${firstName}. A welcome email was sent to ${guest.email}.`
+          : `Welcome, ${firstName}. Your visitor portal is ready.`,
+      welcomeEmailSent === false,
+    );
   }
 
   function onReferenceLookup(result) {

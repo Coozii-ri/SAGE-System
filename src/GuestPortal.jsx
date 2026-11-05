@@ -90,7 +90,7 @@ function VisitorRequestForm({ guest, onClose, onCreated }) {
           assets,
         }),
       });
-      onCreated(result.pass);
+      onCreated(result.pass, result.emailSent);
     } catch (requestError) {
       setFormError(requestError.message);
     } finally {
@@ -210,11 +210,16 @@ export default function GuestPortal({ guest, onLogout, setNotice, referencePass 
     };
   }, [Boolean(pass)]);
 
-  async function handleCreated(createdPass) {
+  async function handleCreated(createdPass, emailSent) {
     setShowForm(false);
     await refresh();
     setSelectedId(createdPass.passId);
-    setNotice('Visit request submitted for approval.');
+    setNotice(
+      emailSent === false
+        ? 'Visit request submitted, but the confirmation email could not be sent.'
+        : 'Visit request submitted for approval. A confirmation email was sent.',
+      emailSent === false,
+    );
   }
 
   return <main className="visitor-shell">

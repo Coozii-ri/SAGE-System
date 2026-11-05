@@ -40,6 +40,8 @@ All three use `SageDemo2026!` by default. Override the seed password with `SAGE_
 
 The sign-in screen uses one email-and-password form for both staff and visitor accounts. The API identifies the account type after validating credentials and routes staff to the operations console or visitors to their personal pass dashboard. Visitors can create an account from the sign-in screen, or look up a pass using its Reference ID for a read-only digital pass view. Reference lookups expose only the pass holder's name, affiliation, pass details, and registered equipment. Signed-in visitor profiles are independent from staff accounts; profile passwords are bcrypt-hashed, and each visitor can only list or retrieve passes belonging to their account. Guest pass approval status refreshes automatically while the portal is open.
 
+Public visitor registration is available from the sign-in screen. New visitors receive a welcome email after account creation, and each submitted visit request triggers a confirmation email with its schedule and equipment details. Staff-created passes also collect the guest's email and send the same confirmation; when the email belongs to an existing visitor account, the pass is attached to that account. These messages are sent by the API using SMTP; if delivery fails, the account or request is still created and the visitor sees a notice.
+
 The interface uses the ocean-tech palette: deepest midnight `#021024`, midnight navy `#052659`, steel blue `#5483B3`, misted ice blue `#7DA0CA`, and soft glowing cyan-white `#C1E8FF`. The login is a full-screen hero with a slow ambient background and a frosted glass sign-in panel.
 
 ## Production build
@@ -58,6 +60,19 @@ In production, configure HTTPS and a strong `SESSION_SECRET`. Cookies are HTTP-o
 The Vercel deployment serves the Vite frontend and proxies `/api/*` requests to the Express API at `https://sage-system-z02p.onrender.com`. The API must be deployed and reachable separately; Vercel's static frontend cannot run the SQLite-backed server itself.
 
 For the API service on Render, use `npm install` as the build command and `npm start` as the start command. Set `NODE_ENV=production`, a strong `SESSION_SECRET`, and `SAGE_DB_PATH=/var/data/sage.sqlite`, then attach a persistent disk mounted at `/var/data`. Without that disk, the SQLite database and sessions can be lost when the service restarts or scales. The API trusts Render's one-hop HTTPS proxy so secure session cookies are returned correctly.
+
+Configure these SMTP environment variables on the Render API service (not Vercel), so the backend can send account and visit-request emails:
+
+| Variable | Gmail example |
+|---|---|
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_SECURE` | `false` |
+| `SMTP_USER` | Your Gmail address |
+| `SMTP_PASSWORD` | A Google App Password (not your regular Gmail password) |
+| `SMTP_FROM` | Your Gmail address, or omit to use `SMTP_USER` |
+
+For Gmail, enable 2-Step Verification and create an App Password in your Google Account. Store it only as the Render `SMTP_PASSWORD` environment variable. If SMTP is missing or delivery fails, the account/pass request still succeeds and the API logs the delivery error; the visitor is notified in the app.
 
 Deploy this repository to Vercel after configuring the API service. The rewrite in `vercel.json` sends API requests to the Render URL above; update that destination if the API's URL changes. Verify the API is awake at `https://sage-system-z02p.onrender.com/api/health` before testing registration.
 

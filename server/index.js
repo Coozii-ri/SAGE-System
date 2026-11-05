@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { db } from './db.js';
+import { sendEmail } from './email.js';
 import { seedDemoAccounts } from './seed.js';
 import { SQLiteSessionStore } from './session-store.js';
 
@@ -43,6 +44,7 @@ const credentialsSchema = z.object({
 });
 const guestSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254),
   affiliation: z.string().trim().max(120).default(''),
   contactNumber: z.string().trim().min(5).max(40),
   govIdType: z.string().trim().min(2).max(60),
@@ -107,6 +109,49 @@ function publicGuest(guest) {
     govIdType: guest.GovID_Type,
     role: 'Guest / Visitor',
   };
+}
+
+async function sendVisitorNotification(to, subject, text, notificationType) {
+  try {
+    await sendEmail({ to, subject, text });
+    return true;
+  } catch (error) {
+    console.error(`Failed to send visitor ${notificationType} email: ${error.message}`);
+    return false;
+  }
+}
+
+function formatEmailDate(value) {
+  return `${new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(value))} UTC`;
+}
+
+async function sendPassCreatedEmail(pass, fullName, email) {
+  return sendVisitorNotification(
+    email,
+    'SAGE campus visit request received',
+    [
+      `Hello ${fullName},`,
+      '',
+      'We received your campus visit request. Its current status is pending approval.',
+      '',
+      `Host department: ${pass.hostDepartment}`,
+      `Purpose: ${pass.purpose}`,
+      `Arrival: ${formatEmailDate(pass.validFrom)}`,
+      `Departure: ${formatEmailDate(pass.validUntil)}`,
+      ...(pass.assets.length
+        ? ['', 'Registered equipment:', ...pass.assets.map((asset) => `- ${asset.itemDescription} (Serial: ${asset.serialNumber})`)]
+        : []),
+      '',
+      'We will update your pass in the SAGE visitor portal when its status changes.',
+      '',
+      'SAGE Campus Access',
+    ].join('\n'),
+    'visit request',
+  );
 }
 
 function requireAuth(req, res, next) {
@@ -247,6 +292,12 @@ app.post('/api/guest/auth/register', async (req, res, next) => {
         email,
         passwordHash,
       ).lastInsertRowid;
+    const emailSent = await sendVisitorNotification(
+      email,
+      'Welcome to SAGE visitor access',
+      `Hello ${data.fullName},\n\nYour SAGE visitor account has been created. You can now sign in with this email address to request and manage campus visits.\n\nFor your security, never share your password.\n\nSAGE Campus Access`,
+      'welcome',
+    );
     req.session.regenerate((error) => {
       if (error) {
         next(error);
@@ -256,6 +307,7 @@ app.post('/api/guest/auth/register', async (req, res, next) => {
       const guest = db.prepare('SELECT * FROM Guest WHERE GuestID = ?').get(guestId);
       res.status(201).json({
         guest: publicGuest(guest),
+        emailSent,
       });
     });
   } catch (error) {
@@ -310,7 +362,7 @@ app.get('/api/guest/auth/session', requireGuest, (req, res) => {
   res.json({ guest: publicGuest(req.guest) });
 });
 
-app.post('/api/guest/passes', requireGuest, (req, res) => {
+app.post('/api/guest/passes', requireGuest, async (req, res) => {
   const result = validate(visitorPassSchema, req.body);
   if (result.error) {
     res.status(400).json({ error: result.error });
@@ -338,7 +390,9 @@ app.post('/api/guest/passes', requireGuest, (req, res) => {
     return Number(pass.lastInsertRowid);
   });
   const passId = createPass();
-  res.status(201).json({ pass: getPass(passId) });
+  const pass = getPass(passId);
+  const emailSent = await sendPassCreatedEmail(pass, req.guest.FullName, req.guest.Email);
+  res.status(201).json({ pass, emailSent });
 });
 
 app.get('/api/guest/passes', requireGuest, (req, res) => {
@@ -516,28 +570,50 @@ app.get('/api/passes/:id', requireAuth, (req, res) => {
   res.json({ pass });
 });
 
-app.post('/api/passes', requireAuth, allowRoles('Facilities Officer'), (req, res) => {
+app.post('/api/passes', requireAuth, allowRoles('Facilities Officer'), async (req, res) => {
   const result = validate(passSchema, req.body);
   if (result.error) {
     res.status(400).json({ error: result.error });
     return;
   }
   const data = result.data;
+  const guestEmail = data.guest.email.toLowerCase();
   const createPass = db.transaction(() => {
-    const guest = db.prepare(`
-      INSERT INTO Guest (FullName, Affiliation, ContactNumber, GovID_Type)
-      VALUES (?, ?, ?, ?)
-    `).run(
-      data.guest.fullName,
-      data.guest.affiliation,
-      data.guest.contactNumber,
-      data.guest.govIdType,
-    );
+    const existingGuest = db.prepare(`
+      SELECT GuestID, PasswordHash FROM Guest WHERE Email = ? COLLATE NOCASE
+    `).get(guestEmail);
+    let guestId;
+    if (existingGuest) {
+      guestId = existingGuest.GuestID;
+      if (!existingGuest.PasswordHash) {
+        db.prepare(`
+          UPDATE Guest SET FullName = ?, Affiliation = ?, ContactNumber = ?, GovID_Type = ?
+          WHERE GuestID = ?
+        `).run(
+          data.guest.fullName,
+          data.guest.affiliation,
+          data.guest.contactNumber,
+          data.guest.govIdType,
+          guestId,
+        );
+      }
+    } else {
+      guestId = db.prepare(`
+        INSERT INTO Guest (FullName, Affiliation, ContactNumber, GovID_Type, Email)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        data.guest.fullName,
+        data.guest.affiliation,
+        data.guest.contactNumber,
+        data.guest.govIdType,
+        guestEmail,
+      ).lastInsertRowid;
+    }
     const pass = db.prepare(`
       INSERT INTO GatePass (GuestID, HostDepartment, Purpose, ValidFrom, ValidUntil)
       VALUES (?, ?, ?, ?, ?)
     `).run(
-      guest.lastInsertRowid,
+      guestId,
       data.hostDepartment,
       data.purpose,
       new Date(data.validFrom).toISOString(),
@@ -553,7 +629,9 @@ app.post('/api/passes', requireAuth, allowRoles('Facilities Officer'), (req, res
     return Number(pass.lastInsertRowid);
   });
   const passId = createPass();
-  res.status(201).json({ pass: getPass(passId) });
+  const pass = getPass(passId);
+  const emailSent = await sendPassCreatedEmail(pass, pass.fullName, guestEmail);
+  res.status(201).json({ pass, emailSent });
 });
 
 app.patch('/api/passes/:id/validity', requireAuth, allowRoles('Facilities Officer'), (req, res) => {
