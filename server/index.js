@@ -10,7 +10,6 @@ import { z } from 'zod';
 import { db } from './db.js';
 import { sendEmail } from './email.js';
 import { seedDemoAccounts } from './seed.js';
-import { bootstrapStaffAccounts, getStaffAccountsFromEnvironment } from './staff-bootstrap.js';
 import { SQLiteSessionStore } from './session-store.js';
 
 const app = express();
