@@ -142,6 +142,32 @@ function escapeHtml(value) {
   })[character]);
 }
 
+async function sendLoginNotification({ fullName, email, role }) {
+  const signedInAt = formatEmailDate(new Date());
+  const safeName = escapeHtml(fullName);
+  const safeRole = escapeHtml(role);
+  try {
+    await sendEmail({
+      to: email,
+      subject: 'New sign-in to your SAGE account',
+      text: [
+        `Hello ${fullName},`,
+        '',
+        'Your SAGE Campus Access account was successfully signed in.',
+        `Account type: ${role}`,
+        `Time: ${signedInAt}`,
+        '',
+        'If this was not you, change your password and contact your campus administrator immediately.',
+        '',
+        'SAGE Campus Access',
+      ].join('\n'),
+      html: `<div style="font-family:Arial,sans-serif;color:#10243b;line-height:1.55"><p>Hello ${safeName},</p><p>Your SAGE Campus Access account was <strong>successfully signed in</strong>.</p><p><strong>Account type:</strong> ${safeRole}<br><strong>Time:</strong> ${escapeHtml(signedInAt)}</p><p>If this was not you, change your password and contact your campus administrator immediately.</p><p>SAGE Campus Access</p></div>`,
+    });
+  } catch (error) {
+    console.error(`Failed to send login notification email: ${error.message}`);
+  }
+}
+
 async function sendPassCreatedEmail(pass, fullName, email) {
   const qrCode = await QRCode.toBuffer(pass.referenceId, {
     type: 'png',
@@ -378,6 +404,7 @@ app.post('/api/guest/auth/login', async (req, res, next) => {
         return;
       }
       req.session.guestId = guest.GuestID;
+      void sendLoginNotification(publicGuest(guest));
       res.json({ guest: publicGuest(guest) });
     });
   } catch (error) {
@@ -515,6 +542,7 @@ app.post('/api/auth/login', async (req, res, next) => {
           return;
         }
         req.session.staffId = staff.StaffID;
+        void sendLoginNotification(publicStaff(staff));
         res.json({ staff: publicStaff(staff) });
       });
       return;
@@ -533,6 +561,7 @@ app.post('/api/auth/login', async (req, res, next) => {
         return;
       }
       req.session.guestId = guest.GuestID;
+      void sendLoginNotification(publicGuest(guest));
       res.json({ guest: publicGuest(guest) });
     });
   } catch (error) {
