@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import express from 'express';
+import QRCode from 'qrcode';
 import session from 'express-session';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { z } from 'zod';
 import { db } from './db.js';
 import { sendEmail } from './email.js';
 import { seedDemoAccounts } from './seed.js';
+import { bootstrapStaffAccounts, getStaffAccountsFromEnvironment } from './staff-bootstrap.js';
 import { SQLiteSessionStore } from './session-store.js';
 
 const app = express();
@@ -111,9 +113,9 @@ function publicGuest(guest) {
   };
 }
 
-async function sendVisitorNotification(to, subject, text, notificationType) {
+async function sendVisitorNotification(to, subject, text, notificationType, emailContent = {}) {
   try {
-    await sendEmail({ to, subject, text });
+    await sendEmail({ to, subject, text, ...emailContent });
     return true;
   } catch (error) {
     console.error(`Failed to send visitor ${notificationType} email: ${error.message}`);
@@ -129,7 +131,31 @@ function formatEmailDate(value) {
   }).format(new Date(value))} UTC`;
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
+}
+
 async function sendPassCreatedEmail(pass, fullName, email) {
+  const qrCode = await QRCode.toBuffer(pass.referenceId, {
+    type: 'png',
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 240,
+    color: { dark: '#052659', light: '#ffffff' },
+  });
+  const safeName = escapeHtml(fullName);
+  const safeReferenceId = escapeHtml(pass.referenceId);
+  const safeHost = escapeHtml(pass.hostDepartment);
+  const safePurpose = escapeHtml(pass.purpose);
+  const safeAssets = pass.assets.map((asset) =>
+    `<li>${escapeHtml(asset.itemDescription)} (Serial: ${escapeHtml(asset.serialNumber)})</li>`,
+  ).join('');
   return sendVisitorNotification(
     email,
     'SAGE campus visit request received',
@@ -138,6 +164,7 @@ async function sendPassCreatedEmail(pass, fullName, email) {
       '',
       'We received your campus visit request. Its current status is pending approval.',
       '',
+      `Reference ID: ${pass.referenceId}`,
       `Host department: ${pass.hostDepartment}`,
       `Purpose: ${pass.purpose}`,
       `Arrival: ${formatEmailDate(pass.validFrom)}`,
@@ -146,11 +173,21 @@ async function sendPassCreatedEmail(pass, fullName, email) {
         ? ['', 'Registered equipment:', ...pass.assets.map((asset) => `- ${asset.itemDescription} (Serial: ${asset.serialNumber})`)]
         : []),
       '',
-      'We will update your pass in the SAGE visitor portal when its status changes.',
+      'Campus has one main entrance gate. Present either this Reference ID or the attached QR code to the security guard for pass verification and check-in.',
+      'Entry is allowed only after the pass is approved and during its validity window. Bring your government-issued photo ID.',
       '',
       'SAGE Campus Access',
     ].join('\n'),
     'visit request',
+    {
+      html: `<div style="font-family:Arial,sans-serif;color:#10243b;line-height:1.55"><p>Hello ${safeName},</p><p>Your campus visit request has been received and is <strong>pending approval</strong>.</p><p><strong>Reference ID</strong><br><span style="display:inline-block;padding:10px 14px;border:1px solid #7da0ca;border-radius:6px;background:#eff8ff;color:#052659;font-size:18px;font-weight:bold;letter-spacing:1px">${safeReferenceId}</span></p><p><strong>Host department:</strong> ${safeHost}<br><strong>Purpose:</strong> ${safePurpose}<br><strong>Arrival:</strong> ${escapeHtml(formatEmailDate(pass.validFrom))}<br><strong>Departure:</strong> ${escapeHtml(formatEmailDate(pass.validUntil))}</p>${safeAssets ? `<p><strong>Registered equipment</strong></p><ul>${safeAssets}</ul>` : ''}<p><strong>At the gate:</strong> Campus has one main entrance gate. Present either the Reference ID above or the attached QR code to the security guard for pass verification and check-in. Bring your government-issued photo ID.</p><p>Entry is allowed only after approval and during the pass validity window.</p><p><img src="cid:sage-pass-qr" width="240" height="240" alt="QR code for Reference ID ${safeReferenceId}" style="display:block;width:240px;height:240px"><br><small>QR code for Reference ID ${safeReferenceId}</small></p><p>SAGE Campus Access</p></div>`,
+      attachments: [{
+        filename: `SAGE-${pass.passId}-QR.png`,
+        content: qrCode,
+        contentType: 'image/png',
+        cid: 'sage-pass-qr',
+      }],
+    },
   );
 }
 
@@ -295,7 +332,7 @@ app.post('/api/guest/auth/register', async (req, res, next) => {
     const emailSent = await sendVisitorNotification(
       email,
       'Welcome to SAGE visitor access',
-      `Hello ${data.fullName},\n\nYour SAGE visitor account has been created. You can now sign in with this email address to request and manage campus visits.\n\nFor your security, never share your password.\n\nSAGE Campus Access`,
+      `Hello ${data.fullName},\n\nYour SAGE visitor account has been created. Sign in with this email address to request and manage campus visits. Each submitted request receives a Reference ID, which you can copy from your pass or present as its QR code after approval. Entry is allowed only for approved passes during their validity window; bring your government-issued photo ID.\n\nFor your security, never share your password.\n\nSAGE Campus Access`,
       'welcome',
     );
     req.session.regenerate((error) => {
@@ -380,6 +417,7 @@ app.post('/api/guest/passes', requireGuest, async (req, res) => {
       new Date(data.validFrom).toISOString(),
       new Date(data.validUntil).toISOString(),
     );
+    setUniqueReference(Number(pass.lastInsertRowid));
     const insertAsset = db.prepare(`
       INSERT INTO AssetEntry (PassID, ItemDescription, SerialNumber)
       VALUES (?, ?, ?)
@@ -409,7 +447,8 @@ app.get('/api/guest/passes/reference/:referenceId', (req, res) => {
     return;
   }
   const passId = db.prepare(`
-    SELECT PassID FROM GatePass WHERE ReferenceID = ? COLLATE NOCASE
+    SELECT PassID FROM GatePass
+    WHERE ReferenceID = ? COLLATE NOCASE AND ApprovalStatus = 'Approved'
   `).get(referenceId)?.PassID;
   if (!passId) {
     res.status(404).json({ error: 'No visitor pass was found for that Reference ID.' });
@@ -619,6 +658,7 @@ app.post('/api/passes', requireAuth, allowRoles('Facilities Officer'), async (re
       new Date(data.validFrom).toISOString(),
       new Date(data.validUntil).toISOString(),
     );
+    setUniqueReference(Number(pass.lastInsertRowid));
     const insertAsset = db.prepare(`
       INSERT INTO AssetEntry (PassID, ItemDescription, SerialNumber)
       VALUES (?, ?, ?)
@@ -703,7 +743,7 @@ app.patch('/api/passes/:id/approval', requireAuth, allowRoles('Facilities Office
       return;
     }
     const approve = db.transaction(() => {
-      setUniqueReference(passId);
+      if (!pass.ReferenceID) setUniqueReference(passId);
       db.prepare(`
         UPDATE GatePass SET ApprovalStatus = 'Approved', ApprovedBy = ?, ApprovedAt = ?
         WHERE PassID = ?
@@ -831,6 +871,14 @@ if (!isProduction && process.env.SAGE_SEED_DEMO !== 'false') {
     process.exit(1);
   }
 }
+
+if (isProduction && (process.env.SAGE_FACILITIES_PASSWORD || process.env.SAGE_GUARD_PASSWORD)) {
+  const accounts = await bootstrapStaffAccounts(db, getStaffAccountsFromEnvironment());
+  for (const account of accounts) {
+    console.log(`Created or reset ${account.role} account: ${account.email}`);
+  }
+}
+
 const cleanupTimer = setInterval(() => {
   try {
     db.prepare('DELETE FROM SessionStore WHERE ExpiresAt <= ?').run(Date.now());
