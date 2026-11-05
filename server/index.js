@@ -19,6 +19,7 @@ if (isProduction && !process.env.SESSION_SECRET) {
 }
 
 app.disable('x-powered-by');
+if (isProduction) app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
 app.use(
   session({

@@ -53,6 +53,14 @@ npm start
 
 In production, configure HTTPS and a strong `SESSION_SECRET`. Cookies are HTTP-only, secure, SameSite strict, and expire after eight hours. Passwords are stored as bcrypt hashes; the application does not seed demo accounts in production.
 
+## Deploy the frontend on Vercel
+
+The Vercel deployment serves the Vite frontend and proxies `/api/*` requests to the Express API at `https://sage-system-z02p.onrender.com`. The API must be deployed and reachable separately; Vercel's static frontend cannot run the SQLite-backed server itself.
+
+For the API service on Render, use `npm install` as the build command and `npm start` as the start command. Set `NODE_ENV=production`, a strong `SESSION_SECRET`, and `SAGE_DB_PATH=/var/data/sage.sqlite`, then attach a persistent disk mounted at `/var/data`. Without that disk, the SQLite database and sessions can be lost when the service restarts or scales. The API trusts Render's one-hop HTTPS proxy so secure session cookies are returned correctly.
+
+Deploy this repository to Vercel after configuring the API service. The rewrite in `vercel.json` sends API requests to the Render URL above; update that destination if the API's URL changes. Verify the API is awake at `https://sage-system-z02p.onrender.com/api/health` before testing registration.
+
 ## API
 
 Sessions are persisted in SQLite. Staff endpoints require an authenticated staff session; visitor endpoints require the visitor session created by visitor registration or sign-in.
