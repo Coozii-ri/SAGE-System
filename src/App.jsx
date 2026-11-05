@@ -6,13 +6,13 @@ import {
   KeyRound, LayoutDashboard, LogOut, Menu, Moon, Plus, Search, Shield, ShieldCheck,
   Sun, UserRound, Users, X,
 } from 'lucide-react';
+import PhoneInput from 'react-phone-input-2';
 import GuestPortal from './GuestPortal.jsx';
 import { api } from './api.js';
 
 const DEMO_PASSWORD = 'SageDemo2026!';
 const FACILITIES_EMAIL = 'facility@feu.edu.ph';
 const GUARD_EMAIL = 'guard@feu.edu.ph';
-
 function formatDate(value, options = {}) {
   if (!value) return '—';
   const { time, ...formatOptions } = options;
@@ -85,7 +85,12 @@ function Login({ onLogin, onGuestLogin, onReferenceLookup, theme, onToggleTheme 
         return;
       }
       const path = mode === 'register' ? '/api/guest/auth/register' : '/api/auth/login';
-      const body = mode === 'register' ? { ...profile, email, password } : { email, password };
+      const body = mode === 'register' ? {
+        ...profile,
+        contactNumber: profile.contactNumber ? `+${profile.contactNumber.replace(/^\+/, '')}` : '',
+        email,
+        password,
+      } : { email, password };
       const result = await api(path, {
         method: 'POST',
         body: JSON.stringify(body),
@@ -132,7 +137,7 @@ function Login({ onLogin, onGuestLogin, onReferenceLookup, theme, onToggleTheme 
               <div className="input-with-icon"><UserRound size={17} /><input id="guest-name" autoComplete="name" value={profile.fullName} onChange={(event) => setProfile({ ...profile, fullName: event.target.value })} minLength="2" maxLength="120" required /></div>
               <label htmlFor="guest-affiliation">Affiliation <span className="optional">(optional)</span></label>
               <div className="input-with-icon"><Building2 size={17} /><input id="guest-affiliation" autoComplete="organization" value={profile.affiliation} onChange={(event) => setProfile({ ...profile, affiliation: event.target.value })} maxLength="120" /></div>
-              <div className="guest-profile-fields"><div><label htmlFor="guest-phone">Contact number</label><div className="input-with-icon"><input id="guest-phone" autoComplete="tel" value={profile.contactNumber} onChange={(event) => setProfile({ ...profile, contactNumber: event.target.value })} minLength="5" maxLength="40" required /></div></div><div><label htmlFor="guest-id">Government ID</label><div className="input-with-icon"><input id="guest-id" value={profile.govIdType} onChange={(event) => setProfile({ ...profile, govIdType: event.target.value })} minLength="2" maxLength="60" placeholder="Passport" required /></div></div></div>
+              <div className="guest-profile-fields"><div><label htmlFor="guest-phone">Contact number</label><PhoneInput country="ph" countryCodeEditable={false} value={profile.contactNumber} onChange={(contactNumber) => setProfile({ ...profile, contactNumber })} enableSearch searchPlaceholder="Search for countries" inputProps={{ id: 'guest-phone', name: 'contactNumber', autoComplete: 'tel', minLength: 8, maxLength: 25, required: true }} inputClass="guest-phone-input" containerClass="guest-phone-control" buttonClass="guest-phone-button" dropdownClass="guest-phone-dropdown" searchClass="guest-phone-search" /></div><div><label htmlFor="guest-id">Government ID</label><div className="input-with-icon"><input id="guest-id" value={profile.govIdType} onChange={(event) => setProfile({ ...profile, govIdType: event.target.value })} minLength="2" maxLength="60" placeholder="Passport" required /></div></div></div>
             </>}
             {mode === 'reference' ? <>
               <label htmlFor="reference-id">Visitor Reference ID</label>
