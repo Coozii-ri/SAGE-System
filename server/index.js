@@ -218,6 +218,55 @@ async function sendPassCreatedEmail(pass, fullName, email) {
   );
 }
 
+async function sendPassApprovedEmail(pass, fullName, email) {
+  const qrCode = await QRCode.toBuffer(pass.referenceId, {
+    type: 'png',
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 240,
+    color: { dark: '#052659', light: '#ffffff' },
+  });
+  const safeName = escapeHtml(fullName);
+  const safeReferenceId = escapeHtml(pass.referenceId);
+  const safeHost = escapeHtml(pass.hostDepartment);
+  const safePurpose = escapeHtml(pass.purpose);
+  const safeAssets = pass.assets.map((asset) =>
+    `<li>${escapeHtml(asset.itemDescription)} (Serial: ${escapeHtml(asset.serialNumber)})</li>`,
+  ).join('');
+  return sendVisitorNotification(
+    email,
+    'SAGE campus visit approved',
+    [
+      `Hello ${fullName},`,
+      '',
+      'Your SAGE campus visit request has been approved.',
+      '',
+      `Reference ID: ${pass.referenceId}`,
+      `Host department: ${pass.hostDepartment}`,
+      `Purpose: ${pass.purpose}`,
+      `Arrival: ${formatEmailDate(pass.validFrom)}`,
+      `Departure: ${formatEmailDate(pass.validUntil)}`,
+      ...(pass.assets.length
+        ? ['', 'Registered equipment:', ...pass.assets.map((asset) => `- ${asset.itemDescription} (Serial: ${asset.serialNumber})`)]
+        : []),
+      '',
+      'Present this Reference ID or the attached QR code to the security guard at the main entrance. Bring your government-issued photo ID.',
+      '',
+      'SAGE Campus Access',
+    ].join('\n'),
+    'approval',
+    {
+      html: `<div style="font-family:Arial,sans-serif;color:#10243b;line-height:1.55"><p>Hello ${safeName},</p><p>Your SAGE campus visit request has been <strong>approved</strong>.</p><p><strong>Reference ID</strong><br><span style="display:inline-block;padding:10px 14px;border:1px solid #7da0ca;border-radius:6px;background:#eff8ff;color:#052659;font-size:18px;font-weight:bold;letter-spacing:1px">${safeReferenceId}</span></p><p><strong>Host department:</strong> ${safeHost}<br><strong>Purpose:</strong> ${safePurpose}<br><strong>Arrival:</strong> ${escapeHtml(formatEmailDate(pass.validFrom))}<br><strong>Departure:</strong> ${escapeHtml(formatEmailDate(pass.validUntil))}</p>${safeAssets ? `<p><strong>Registered equipment</strong></p><ul>${safeAssets}</ul>` : ''}<p><strong>At the gate:</strong> Present the Reference ID above or the attached QR code to the security guard at the main entrance. Bring your government-issued photo ID.</p><p><img src="cid:sage-pass-qr" width="240" height="240" alt="QR code for Reference ID ${safeReferenceId}" style="display:block;width:240px;height:240px"><br><small>QR code for Reference ID ${safeReferenceId}</small></p><p>SAGE Campus Access</p></div>`,
+      attachments: [{
+        filename: `SAGE-${pass.passId}-QR.png`,
+        content: qrCode,
+        contentType: 'image/png',
+        cid: 'sage-pass-qr',
+      }],
+    },
+  );
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.staffId) {
     res.status(401).json({ error: 'Please sign in to continue.' });
@@ -746,7 +795,7 @@ app.patch('/api/passes/:id/validity', requireAuth, allowRoles('Facilities Office
   res.json({ pass: getPass(passId) });
 });
 
-app.patch('/api/passes/:id/approval', requireAuth, allowRoles('Facilities Officer'), (req, res) => {
+app.patch('/api/passes/:id/approval', requireAuth, allowRoles('Facilities Officer'), async (req, res) => {
   const passId = Number(req.params.id);
   const result = validate(z.object({ status: z.enum(['Approved', 'Rejected']) }), req.body);
   if (!Number.isSafeInteger(passId) || passId < 1) {
@@ -766,6 +815,7 @@ app.patch('/api/passes/:id/approval', requireAuth, allowRoles('Facilities Office
     res.status(409).json({ error: 'Only pending passes can be approved or rejected.' });
     return;
   }
+  const guest = db.prepare('SELECT FullName, Email FROM Guest WHERE GuestID = ?').get(pass.GuestID);
   if (result.data.status === 'Approved') {
     const now = new Date().toISOString();
     if (Date.parse(pass.ValidUntil) <= Date.now() || Date.parse(pass.ValidFrom) >= Date.parse(pass.ValidUntil)) {
@@ -786,7 +836,11 @@ app.patch('/api/passes/:id/approval', requireAuth, allowRoles('Facilities Office
       WHERE PassID = ?
     `).run(req.staff.StaffID, new Date().toISOString(), passId);
   }
-  res.json({ pass: getPass(passId) });
+  const updatedPass = getPass(passId);
+  const emailSent = result.data.status === 'Approved' && guest?.Email
+    ? await sendPassApprovedEmail(updatedPass, guest.FullName, guest.Email)
+    : null;
+  res.json({ pass: updatedPass, emailSent });
 });
 
 app.patch('/api/assets/:id/clearance', requireAuth, allowRoles('Facilities Officer'), (req, res) => {
